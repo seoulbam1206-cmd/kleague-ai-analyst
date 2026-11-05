@@ -8,6 +8,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from .viewer import parse_admin_emails
+
 try:  # .env 는 로컬 개발용 (배포 환경에선 secrets 사용)
     from dotenv import load_dotenv
 
@@ -58,6 +60,8 @@ class Settings:
     demo_mode: bool = False
     # 접속 코드 (선택). 비어 있으면 접속 확인 없이 바로 사용. 값은 화면·로그·repr 에 내지 않는다
     access_code: str = field(default="", repr=False)
+    # 생성된 SQL 을 볼 수 있는 관리자 이메일 (선택, 소문자로 정리됨). 비어 있으면 실데이터에서는 아무도 못 봄
+    admin_emails: frozenset = field(default_factory=frozenset, repr=False)
     extra: dict = field(default_factory=dict)
 
 
@@ -97,4 +101,5 @@ def load_settings() -> Settings:
         daily_token_budget=int(_secret("DAILY_TOKEN_BUDGET", "90000")),
         demo_mode=demo,
         access_code=(_secret("ACCESS_CODE", "") or "").strip(),
+        admin_emails=parse_admin_emails(_secret("ADMIN_EMAILS", "")),
     )

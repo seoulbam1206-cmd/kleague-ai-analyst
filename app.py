@@ -22,6 +22,7 @@ from kleague.ratelimit import SlidingWindowLimiter, budget_left
 from kleague.report import list_games, write_report
 from kleague.store import AppStore
 from kleague.text2sql import Answer, Text2SQL, Turn
+from kleague import viewer
 
 ROOT = Path(__file__).resolve().parent
 
@@ -109,6 +110,10 @@ except Exception as e:  # 오류 원문에는 접속 주소·계정이 섞일 �
 if settings.demo_mode:
     st.warning("**가상 데이터입니다. 실제 K리그 기록이 아닙니다.**")
 
+# 생성된 SQL·오류 상세·평가 기록(SQL 포함)은 관리자 이메일(ADMIN_EMAILS)에게만. 데모 모드는 모두에게.
+# 이메일을 알 수 없거나 관리자가 아니면 숨긴다. 표·요약·차트·👍/👎 는 모두에게 그대로 보인다.
+SHOW_SQL = viewer.can_view_sql(viewer.read_viewer_email(), settings.admin_emails, settings.demo_mode)
+
 if engine:
     engine.load_examples(approved_examples_cached(store))
 
@@ -162,11 +167,13 @@ def render_answer(ans: Answer, idx: int, log_id: int | None) -> None:
         meta.append(f"자가 수정 {ans.attempts - 1}회")
     if ans.tokens:
         meta.append(f"{ans.tokens:,} 토큰")
-    if ans.sql:
+    if ans.sql and SHOW_SQL:
         with st.expander("생성된 SQL · " + " · ".join(meta)):
             st.code(ans.sql, language="sql")
-            for n in ans.notes:
+            for n in ans.notes:   # 오류 원문·자가 수정 내역 (SQL 조각이 섞일 수 있음)
                 st.caption(n)
+    elif ans.sql:
+        st.caption(" · ".join(meta))   # SQL·오류 상세 없이 응답 시간·토큰만
     if log_id and ans.status == "ok":
         fb_key = f"fb_{idx}"
         if st.session_state.get(fb_key):
@@ -312,7 +319,7 @@ with tab_about:
     ok_rate = stt["by_status"].get("ok", 0) / stt["total"] if stt["total"] else 0
     c2.metric("성공률", f"{ok_rate * 100:.0f}%")
     c3.metric("평균 응답", f"{stt['avg_latency_ms']:,}ms")
-    rep_md = ROOT / "eval" / "RESULTS.md"  # 정답률 기록 (실행별 보고서는 eval/runs/)
-    if rep_md.exists():
+    rep_md = ROOT / "eval" / "RESULTS.md"  # 정답률 기록 (실행별 보고서는 eval/runs/). 정답 SQL 조각이 있어 관리자만
+    if rep_md.exists() and SHOW_SQL:
         st.markdown("#### 정답률 평가")
         st.markdown(rep_md.read_text(encoding="utf-8"))

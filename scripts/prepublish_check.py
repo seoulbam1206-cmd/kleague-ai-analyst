@@ -13,6 +13,8 @@
   6. eval/ 보고서의 실제 기록 값 (경고만, 로컬 DB 가 있을 때)
   7. 큰 파일 (2MB 초과, 경고)
   8. 가상 데이터 DB: demo/demo.sqlite 에 실제 구단·선수 이름, 실제 경기 기록, 로그 표가 없는지 (실패)
+  9. 이메일 주소: 가짜 주소(.invalid, example.com 등)가 아닌 이메일이 파일에 있으면 실패 (관리자 이메일은 Secrets 에만)
+     로컬 전용 도구(LOCAL_ONLY: 피드백 요약 등)는 복사본에 넣지 않는다
 
 결과: 실패가 하나라도 있으면 종료 코드 1. 비밀값 원문은 어디에도 출력하지 않는다.
 """
@@ -49,6 +51,11 @@ SKIP_DIRS = (".git/", ".venv/", "venv/", ".pytest_cache/", ".mypy_cache/", ".ruf
 FORBIDDEN_PATH_PATTERNS = ("eval/gold_check.md", "eval/report*.json", "eval/runs/*.json")
 # 공개 여부를 사용자가 정하기 전까지 복사본에서 빼 두는 파일 (지금은 없음)
 HOLD: dict[str, str] = {}
+# 내 PC 에서만 쓰는 관리자 도구 (실제 기록 DB 를 읽음) → 복사본에 넣지 않고, 복사본에 있으면 실패
+LOCAL_ONLY = ("scripts/feedback_report.py", "tests/test_feedback_report.py")
+# 이메일 주소: 가짜 주소(.invalid, example.com/org/net)만 허용. 실제 주소가 파일에 있으면 실패 (값은 출력 안 함)
+EMAIL_RX = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})")
+FAKE_EMAIL_DOMAINS = ("example.com", "example.org", "example.net")
 
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".bmp")
 LOGO_WORDS = ("logo", "emblem", "kleague", "k-league", "kfa", "로고", "엠블럼", "엠블렘")
@@ -107,6 +114,8 @@ def _excluded(rel: str) -> str | None:
         return "로고 이미지"
     if rel in HOLD:
         return "보류"
+    if rel in LOCAL_ONLY:
+        return "로컬 전용"
     return None
 
 
@@ -257,7 +266,7 @@ def run_checks(root: Path, files: list[str] | None = None,
     c_forbid = Check("1. 올리면 안 되는 파일·폴더")
     for rel in files:
         why = _excluded(rel)
-        if why in ("금지 폴더", "금지 파일", "비공개 평가 결과"):
+        if why in ("금지 폴더", "금지 파일", "비공개 평가 결과", "로컬 전용"):
             c_forbid.add("실패", f"{rel} ({why})")
     if dropped:
         groups: dict[str, int] = {}
@@ -273,6 +282,7 @@ def run_checks(root: Path, files: list[str] | None = None,
     c_real = Check("6. eval 보고서의 실제 기록 값")
     c_big = Check("7. 큰 파일 (2MB 초과)")
     c_demo = Check("8. 가상 데이터 DB (demo/demo.sqlite)")
+    c_mail = Check("9. 이메일 주소 (가짜 주소만 허용)")
 
     # 원본 프로젝트의 .env·옛 기록은 복사본을 점검할 때도 비교 기준으로 쓴다
     secrets = known_secret_values(ROOT) + (known_secret_values(root) if root.resolve() != ROOT else [])
@@ -313,6 +323,10 @@ def run_checks(root: Path, files: list[str] | None = None,
             for label, rx in INTERNAL_PATTERNS:
                 for m in rx.finditer(text):
                     c_int.add("실패", f"{where(m.start())} {label}")
+        for m in EMAIL_RX.finditer(text):
+            dom = m.group(1).lower()
+            if not (dom.endswith(".invalid") or dom in FAKE_EMAIL_DOMAINS):
+                c_mail.add("실패", f"{where(m.start())} 실제 이메일로 보이는 주소 (값은 표시 안 함)")
         if rel.startswith("eval/") and names:
             hit = sorted({n for n in names if n in text})
             if hit:
@@ -325,7 +339,7 @@ def run_checks(root: Path, files: list[str] | None = None,
             c_demo.add(status, detail)
     else:
         c_demo.details.append("포함 안 됨")
-    return [c_forbid, c_pat, c_known, c_int, c_img, c_real, c_big, c_demo]
+    return [c_forbid, c_pat, c_known, c_int, c_img, c_real, c_big, c_demo, c_mail]
 
 
 def render(checks: list[Check], n_files: int) -> str:

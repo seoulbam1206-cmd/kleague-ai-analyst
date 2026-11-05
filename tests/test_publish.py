@@ -183,3 +183,24 @@ def test_run_checks_fails_when_demo_db_has_real_names(tmp_path, monkeypatch):
     checks = P.run_checks(root)
     demo_check = [c for c in checks if c.name.startswith("8.")][0]
     assert demo_check.status == "실패" and not P.passed(checks)
+
+
+# ------------------------------------------------------------ 이메일 주소
+def test_prepublish_flags_real_looking_email_but_not_fake(tmp_path):
+    root = _make_tree(tmp_path / "copy", leak=False)
+    (root / "kleague" / "ok.py").write_text('A = "admin@example.invalid"\nB = "x@example.com"\n', encoding="utf-8")
+    assert P.passed(P.run_checks(root))
+    real = "someone" + "@" + "mail-provider.co.kr"        # 실행할 때 조립 (이 파일이 점검에 걸리지 않게)
+    (root / "kleague" / "bad.py").write_text(f'ADMIN = "{real}"\n', encoding="utf-8")
+    checks = P.run_checks(root)
+    mail = [c for c in checks if c.name.startswith("9.")][0]
+    assert mail.status == "실패" and not P.passed(checks)
+    assert real not in " ".join(mail.details)              # 값은 출력하지 않음
+
+
+def test_local_only_tool_in_copy_fails(tmp_path):
+    root = _make_tree(tmp_path / "copy", leak=False)
+    (root / "scripts").mkdir()
+    (root / "scripts" / "feedback_report.py").write_text("X = 1\n", encoding="utf-8")
+    checks = P.run_checks(root)
+    assert checks[0].status == "실패" and not P.passed(checks)
