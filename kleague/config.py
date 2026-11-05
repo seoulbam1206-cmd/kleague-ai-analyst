@@ -62,6 +62,8 @@ class Settings:
     access_code: str = field(default="", repr=False)
     # 생성된 SQL 을 볼 수 있는 관리자 이메일 (선택, 소문자로 정리됨). 비어 있으면 실데이터에서는 아무도 못 봄
     admin_emails: frozenset = field(default_factory=frozenset, repr=False)
+    # 관리자 코드 (선택, 보조 방법). 맞게 입력한 세션은 SQL 을 본다. 값은 화면·로그·repr 에 내지 않는다
+    admin_code: str = field(default="", repr=False)
     extra: dict = field(default_factory=dict)
 
 
@@ -102,4 +104,5 @@ def load_settings() -> Settings:
         demo_mode=demo,
         access_code=(_secret("ACCESS_CODE", "") or "").strip(),
         admin_emails=parse_admin_emails(_secret("ADMIN_EMAILS", "")),
+        admin_code=(_secret("ADMIN_CODE", "") or "").strip(),
     )

@@ -1,4 +1,4 @@
-streamlit>=1.38
+streamlit>=1.42   # st.user (접속자 정보) 이름이 이 버전부터
 pandas>=2.2
 plotly>=5.22
 pyyaml>=6.0

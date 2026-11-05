@@ -50,6 +50,7 @@ def test_read_viewer_email_from_user_info():
     assert viewer.read_viewer_email(Broken()) is None                                # 읽다 실패 → None
     assert viewer.read_viewer_email({}) is None and viewer.read_viewer_email({"email": None}) is None
     assert viewer.read_viewer_email({"email": "not-an-email"}) is None
+    assert viewer.read_viewer_email({"email": "Test@Example.com"}) is None          # Streamlit 시험용 가짜 값
 
 
 def test_settings_reads_admin_emails(monkeypatch):
@@ -87,7 +88,7 @@ def run_app(monkeypatch, tmp_path, demo_path):
     import streamlit as st
     from streamlit.testing.v1 import AppTest
 
-    def run(email, demo=False, admins=ADMIN):
+    def run(email, demo=False, admins=ADMIN, admin_code=""):
         if demo:
             (tmp_path / "demo").mkdir(exist_ok=True)
             shutil.copy(demo_path, tmp_path / "demo" / "demo.sqlite")   # demo/demo.sqlite → 데모 판정
@@ -100,6 +101,7 @@ def run_app(monkeypatch, tmp_path, demo_path):
         monkeypatch.setenv("GROQ_API_KEY", "")
         monkeypatch.setenv("ACCESS_CODE", "")
         monkeypatch.setenv("ADMIN_EMAILS", admins)
+        monkeypatch.setenv("ADMIN_CODE", admin_code)
         monkeypatch.setattr(viewer, "read_viewer_email", lambda user=None: viewer.normalize_email(email))
         st.cache_resource.clear()
         st.cache_data.clear()
@@ -163,6 +165,7 @@ def test_read_viewer_email_works_inside_app_without_login(monkeypatch, tmp_path,
     monkeypatch.setenv("GROQ_API_KEY", "")
     monkeypatch.setenv("ACCESS_CODE", "")
     monkeypatch.setenv("ADMIN_EMAILS", ADMIN)
+    monkeypatch.setenv("ADMIN_CODE", "")
     st.cache_resource.clear()
     st.cache_data.clear()
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=60)
@@ -170,3 +173,111 @@ def test_read_viewer_email_works_inside_app_without_login(monkeypatch, tmp_path,
     at.run()
     assert not at.exception
     _assert_sql_hidden(at)
+    assert viewer.EMAIL_UNKNOWN_TEXT in _visible(at)   # AppTest 의 가짜 접속자(test@...)는 '확인 불가'
+
+
+# ------------------------------------------------------------ 관리자 코드 (보조 방법)
+CODE = "fake-admin-code-" + "x" * 12        # 가짜 값 (실제 코드 아님)
+
+
+def test_admin_code_gate_rules(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(viewer, "_now", lambda: clock[0])
+    off = viewer.AdminCodeGate("")
+    assert not off.enabled and off.try_code({}, CODE) == "disabled" and not off.is_ok({})
+    g = viewer.AdminCodeGate(f"  {CODE} ")
+    assert CODE not in repr(g)
+    state = {}
+    assert g.try_code(state, "wrong") == "wrong" and not g.is_ok(state)
+    assert g.try_code(state, CODE.upper()) == "wrong"                     # 대소문자 구분 (코드는 정확히)
+    assert g.try_code(state, f" {CODE} ") == "ok" and g.is_ok(state)       # 앞뒤 공백은 무시
+    assert CODE not in str(state)                                          # 세션에 코드·입력값을 저장하지 않음
+
+
+def test_admin_code_rate_limit(monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(viewer, "_now", lambda: clock[0])
+    g, state = viewer.AdminCodeGate(CODE), {}
+    for _ in range(viewer.ADMIN_MAX_FAILS - 1):
+        assert g.try_code(state, "bad") == "wrong"
+    assert g.try_code(state, "bad") == "locked" and g.wait_sec(state) == viewer.ADMIN_LOCK_SEC
+    assert g.try_code(state, CODE) == "locked" and not g.is_ok(state)     # 잠긴 동안은 맞는 코드도 안 받음
+    clock[0] += viewer.ADMIN_LOCK_SEC - 1
+    assert g.try_code(state, CODE) == "locked"
+    clock[0] += 2
+    assert g.wait_sec(state) == 0 and g.try_code(state, CODE) == "ok"     # 잠금이 풀리면 다시 가능
+
+
+def test_can_view_sql_with_code():
+    assert viewer.can_view_sql(None, frozenset(), demo_mode=False, code_ok=True)
+    assert not viewer.can_view_sql(None, frozenset(), demo_mode=False, code_ok=False)
+
+
+def test_email_status_text_never_contains_email():
+    assert viewer.email_status_text(ADMIN) == viewer.EMAIL_OK_TEXT and "@" not in viewer.EMAIL_OK_TEXT
+    assert viewer.email_status_text(None) == viewer.EMAIL_UNKNOWN_TEXT == "접속자 확인: 확인 불가"
+    assert viewer.email_status_text("not-an-email") == viewer.EMAIL_UNKNOWN_TEXT
+
+
+def test_settings_reads_admin_code_without_repr(monkeypatch):
+    monkeypatch.setenv("ADMIN_CODE", f" {CODE} ")
+    s = load_settings()
+    assert s.admin_code == CODE and CODE not in repr(s)
+
+
+def _submit_code(at, code):
+    at.text_input(key="admin_code_input").input(code)
+    at.button(key="admin_code_submit").click().run()
+    assert not at.exception
+    return at
+
+
+def test_diagnostic_shows_status_but_not_email(run_app):
+    at = run_app(ADMIN)
+    text = _visible(at)
+    assert viewer.EMAIL_OK_TEXT in text and ADMIN not in text and "admin@" not in text.lower()
+    at = run_app(None)
+    assert viewer.EMAIL_UNKNOWN_TEXT in _visible(at)
+
+
+def test_no_admin_code_setting_means_no_input(run_app):
+    at = run_app(None, admin_code="")
+    assert not [w for w in at.text_input if w.key == "admin_code_input"]
+    _assert_sql_hidden(at)
+
+
+def test_admin_code_turns_on_sql_when_email_unknown(run_app):
+    at = run_app(None, admin_code=CODE)
+    _assert_sql_hidden(at)                                                 # 입력 전: 숨김
+    _submit_code(at, CODE)
+    _assert_sql_shown(at)                                                  # 맞는 코드: 이 세션에서 보임
+    text = _visible(at)
+    assert "관리자 코드로 켜짐" in text and CODE not in text
+    assert not [w for w in at.text_input if w.key == "admin_code_input"]  # 통과 뒤 입력칸 없음
+
+
+def test_wrong_admin_code_keeps_sql_hidden(run_app):
+    at = _submit_code(run_app("user@example.invalid", admin_code=CODE), "wrong-code")
+    _assert_sql_hidden(at)
+    text = _visible(at)
+    assert "맞지 않습니다" in text and "wrong-code" not in text and CODE not in text
+
+
+def test_admin_code_lock_in_app(run_app, monkeypatch):
+    clock = [5000.0]
+    monkeypatch.setattr(viewer, "_now", lambda: clock[0])
+    at = run_app(None, admin_code=CODE)
+    for i in range(viewer.ADMIN_MAX_FAILS):
+        _submit_code(at, f"bad{i}")
+    assert "잠시 막았습니다" in _visible(at)
+    _submit_code(at, CODE)                                                 # 잠긴 동안 맞는 코드도 거부
+    _assert_sql_hidden(at)
+    clock[0] += viewer.ADMIN_LOCK_SEC + 1
+    _submit_code(at, CODE)
+    _assert_sql_shown(at)
+
+
+def test_new_session_needs_code_again(run_app):
+    at = _submit_code(run_app(None, admin_code=CODE), CODE)
+    _assert_sql_shown(at)
+    _assert_sql_hidden(run_app(None, admin_code=CODE))                     # 새 세션(새로고침) → 다시 숨김

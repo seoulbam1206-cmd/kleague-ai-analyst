@@ -110,9 +110,11 @@ except Exception as e:  # 오류 원문에는 접속 주소·계정이 섞일 �
 if settings.demo_mode:
     st.warning("**가상 데이터입니다. 실제 K리그 기록이 아닙니다.**")
 
-# 생성된 SQL·오류 상세·평가 기록(SQL 포함)은 관리자 이메일(ADMIN_EMAILS)에게만. 데모 모드는 모두에게.
-# 이메일을 알 수 없거나 관리자가 아니면 숨긴다. 표·요약·차트·👍/👎 는 모두에게 그대로 보인다.
-SHOW_SQL = viewer.can_view_sql(viewer.read_viewer_email(), settings.admin_emails, settings.demo_mode)
+# 생성된 SQL·오류 상세·평가 기록(SQL 포함)은 관리자에게만: 관리자 이메일(ADMIN_EMAILS)이거나,
+# 관리자 코드(ADMIN_CODE)를 입력한 세션이거나, 데모 모드. 표·요약·차트·👍/👎 는 모두에게 그대로 보인다.
+# SHOW_SQL 은 사이드바(관리자 코드 입력) 뒤에서 정한다. 이메일·코드는 화면·로그에 내지 않는다.
+VIEWER_EMAIL = viewer.read_viewer_email()
+ADMIN_GATE = viewer.AdminCodeGate(settings.admin_code)
 
 if engine:
     engine.load_examples(approved_examples_cached(store))
@@ -144,6 +146,31 @@ with st.sidebar:
     if st.button("대화 지우기", use_container_width=True):
         st.session_state.chat = []
         st.rerun()
+
+    # 관리자 코드 (ADMIN_CODE 가 있을 때만). 맞으면 이 세션에서만 SQL 표시. 입력값·결과는 기록하지 않는다.
+    if ADMIN_GATE.enabled and not settings.demo_mode:
+        if ADMIN_GATE.is_ok(st.session_state):
+            st.caption("SQL 표시: 관리자 코드로 켜짐 (이 세션만)")
+        else:
+            with st.form("admin_code", clear_on_submit=True):   # 제출 뒤 입력칸을 비움
+                attempt = st.text_input("관리자 코드", type="password", key="admin_code_input")
+                sent = st.form_submit_button("확인", key="admin_code_submit")
+            if sent:
+                result = ADMIN_GATE.try_code(st.session_state, attempt)
+                if result == "ok":
+                    st.rerun()
+                elif result == "locked":
+                    st.caption(f"여러 번 틀려 잠시 막았습니다. {ADMIN_GATE.wait_sec(st.session_state)}초 뒤 다시 시도하세요.")
+                else:
+                    st.caption("관리자 코드가 맞지 않습니다.")
+            elif ADMIN_GATE.wait_sec(st.session_state) > 0:
+                st.caption(f"여러 번 틀려 잠시 막았습니다. {ADMIN_GATE.wait_sec(st.session_state)}초 뒤 다시 시도하세요.")
+
+    # 진단: 접속자 이메일을 읽었는지만 (주소는 보이지 않음)
+    st.caption(viewer.email_status_text(VIEWER_EMAIL))
+
+SHOW_SQL = viewer.can_view_sql(VIEWER_EMAIL, settings.admin_emails, settings.demo_mode,
+                               code_ok=ADMIN_GATE.is_ok(st.session_state))
 
 
 # ---------------------------------------------------------------------------
