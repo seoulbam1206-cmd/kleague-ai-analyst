@@ -1,0 +1,28 @@
+.env
+.streamlit/secrets.toml
+.api_cache/
+demo/app.sqlite
+__pycache__/
+.pytest_cache/
+*.pyc
+eval/report.json
+
+# 로컬 전용 (K리그 프로젝트)
+_old/
+data/
+samples/
+.api_cache/
+.env
+*.bak
+.venv/
+
+# 연맹 로고·엠블럼 이미지는 공개 저장소에 올리지 않는다 (앱은 로고 없이 동작)
+logo.*
+*logo*.png
+*logo*.jpg
+*emblem*
+
+# 평가 결과 중 공개하지 않는 것: 실제 기록 값이 든 정답 점검 원본, AI SQL 이 든 결과 JSON
+eval/gold_check.md
+eval/report*.json
+eval/runs/*.json

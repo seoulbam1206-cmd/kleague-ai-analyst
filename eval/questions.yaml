@@ -1,0 +1,368 @@
+# 평가셋: 질문 + 정답 SQL. 정답 SQL 실행 결과와 AI SQL 실행 결과를 비교해 채점한다.
+# order_matters: true → 순서까지 같아야 정답 (순위형 질문)
+# 카테고리: 선수 / 팀 / 관중 / 경기 / 이벤트 / 복합
+- id: q01
+  category: 선수
+  question: 2026 K리그1 득점왕은 누구야?
+  order_matters: false
+  # 수정(2026-11-05, 평가 결과를 본 뒤, 고정 예외): K리그 대회요강 제30조 4항(개인기록 순위결정)에 따라
+  #   득점 동률이면 ① 최다 득점 → ② 출전경기 적은 선수 → ③ 출전시간 적은 선수 순으로 1명.
+  #   2026 K리그1 의 game_player_stat 은 1~38R(스플릿일반·파이널A/B) 경기만 있어 전체 라운드 조건과 같다.
+  #   선수 이름만 비교한다: 숫자(득점) 컬럼을 넣으면 채점기가 숫자만 비교해, 같은 골 수의 다른 선수도 정답이 되기 때문.
+  sql: |
+    SELECT player_name FROM game_player_stat
+    WHERE meet_year = 2026 AND meet_seq = 1 GROUP BY player_id, player_name
+    ORDER BY SUM(goals) DESC, SUM(played) ASC, SUM(minutes) ASC LIMIT 1
+
+- id: q02
+  category: 팀
+  question: 올해 K리그1 1위 팀과 승점은?
+  order_matters: false
+  sql: |
+    SELECT team_name, points FROM team_rank WHERE meet_year = 2026 AND meet_seq = 1 AND ranking = 1
+
+- id: q03
+  category: 관중
+  question: 2026시즌 관중이 가장 많았던 경기 3개
+  order_matters: true
+  # 수정(2026-11-04): 리그 미지정 = K리그1 규칙에 맞춰 meet_seq = 1 추가 (결과는 같음)
+  # 수정(2026-11-05, 평가 결과를 본 뒤): 질문이 묻지 않은 내부 번호 game_id 를 빼고,
+  #   사용자에게 의미 있는 값(경기 날짜·홈팀·원정팀·홈 득점·원정 득점·관중)으로 바꿈
+  sql: |
+    SELECT g.game_date, ch.team_s_name AS home_team, ca.team_s_name AS away_team,
+           g.home_goal, g.away_goal, g.audience
+    FROM game g JOIN club ch ON ch.team_id = g.home_team_id JOIN club ca ON ca.team_id = g.away_team_id
+    WHERE g.meet_year = 2026 AND g.meet_seq = 1 AND g.is_finished = 1
+    ORDER BY g.audience DESC LIMIT 3
+
+- id: q04
+  category: 팀
+  question: 전북은 2026시즌 몇 승 몇 무 몇 패야?
+  order_matters: false
+  sql: |
+    SELECT SUM(CASE WHEN result='W' THEN 1 ELSE 0 END), SUM(CASE WHEN result='D' THEN 1 ELSE 0 END),
+           SUM(CASE WHEN result='L' THEN 1 ELSE 0 END)
+    FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1 AND team_id = 'K05'
+
+- id: q05
+  category: 관중
+  question: 2026년 토요일 경기 평균 관중은?
+  order_matters: false
+  # 수정(2026-11-04): meet_seq = 1 누락 → K리그2 경기까지 섞여 평균이 달라졌음
+  sql: |
+    SELECT ROUND(AVG(audience)) FROM game WHERE meet_year = 2026 AND meet_seq = 1 AND weekday = '토' AND is_finished = 1
+
+- id: q06
+  category: 팀
+  question: 2026 K리그1 최다 득점 팀
+  order_matters: false
+  sql: |
+    SELECT team_id, SUM(goals_for) AS gf FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1
+    GROUP BY team_id HAVING SUM(goals_for) = (SELECT MAX(s) FROM (SELECT SUM(goals_for) AS s
+      FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1 GROUP BY team_id) x)
+
+- id: q07
+  category: 선수
+  question: 2026시즌 공격포인트(골+도움) 상위 5명
+  order_matters: true
+  sql: |
+    SELECT player_name, SUM(goals) + SUM(assists) AS ap FROM game_player_stat
+    WHERE meet_year = 2026 AND meet_seq = 1 GROUP BY player_id, player_name
+    ORDER BY ap DESC LIMIT 5
+
+- id: q08
+  category: 팀
+  question: 2026시즌 실점이 가장 적은 팀은?
+  order_matters: false
+  sql: |
+    SELECT team_id, SUM(goals_against) FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1
+    GROUP BY team_id HAVING SUM(goals_against) = (SELECT MIN(s) FROM (SELECT SUM(goals_against) AS s
+      FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1 GROUP BY team_id) x)
+
+- id: q09
+  category: 경기
+  question: 2026시즌 한 경기 최다 골이 나온 경기의 스코어
+  order_matters: false
+  # 수정(2026-11-04): meet_seq = 1 누락 → K리그2 경기가 답으로 나왔음
+  # 수정(2026-11-05, 평가 결과를 본 뒤): 질문이 묻지 않은 내부 번호 game_id 를 빼고,
+  #   사용자에게 의미 있는 값(경기 날짜·홈팀·원정팀·홈 득점·원정 득점)으로 바꿈
+  sql: |
+    SELECT g.game_date, ch.team_s_name AS home_team, ca.team_s_name AS away_team, g.home_goal, g.away_goal
+    FROM game g JOIN club ch ON ch.team_id = g.home_team_id JOIN club ca ON ca.team_id = g.away_team_id
+    WHERE g.meet_year = 2026 AND g.meet_seq = 1 AND g.is_finished = 1
+      AND g.home_goal + g.away_goal = (SELECT MAX(home_goal + away_goal) FROM game
+                                       WHERE meet_year = 2026 AND meet_seq = 1 AND is_finished = 1)
+
+- id: q10
+  category: 팀
+  question: 울산의 2026시즌 경기당 평균 슈팅 수
+  order_matters: false
+  sql: |
+    SELECT ROUND(AVG(shots), 2) FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1 AND team_id = 'K01'
+
+- id: q11
+  category: 선수
+  question: 2026 K리그1 출전 시간이 가장 긴 선수 3명
+  order_matters: true
+  sql: |
+    SELECT player_name, SUM(minutes) AS m FROM game_player_stat WHERE meet_year = 2026 AND meet_seq = 1
+    GROUP BY player_id, player_name ORDER BY m DESC LIMIT 3
+
+- id: q12
+  category: 이벤트
+  question: 2026시즌 전반에 나온 골은 총 몇 골?
+  order_matters: false
+  # 수정(2026-11-04): meet_seq = 1 누락 → K리그2 골까지 세었음
+  sql: |
+    SELECT COUNT(*) FROM game_event WHERE meet_year = 2026 AND meet_seq = 1 AND event_type = 'goal' AND half = 1
+
+- id: q13
+  category: 팀
+  question: 서울이 2026시즌 원정에서 이긴 경기 수
+  order_matters: false
+  sql: |
+    SELECT COUNT(*) FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1 AND team_id = 'K09'
+      AND is_home = 0 AND result = 'W'
+
+- id: q14
+  category: 선수
+  question: 2026시즌 외국인 선수 득점 순위 TOP 5
+  order_matters: true
+  sql: |
+    SELECT s.player_name, SUM(s.goals) AS g FROM game_player_stat s JOIN player p ON p.player_id = s.player_id
+    WHERE s.meet_year = 2026 AND s.meet_seq = 1 AND p.nationality <> '한국'
+    GROUP BY s.player_id, s.player_name ORDER BY g DESC LIMIT 5
+
+- id: q15
+  category: 관중
+  question: 2026 K리그1 총 관중 수
+  order_matters: false
+  sql: |
+    SELECT SUM(audience) FROM game WHERE meet_year = 2026 AND meet_seq = 1 AND is_finished = 1
+
+- id: q16
+  category: 팀
+  question: 2026시즌 무승부가 가장 많은 팀
+  order_matters: false
+  sql: |
+    SELECT team_name, draws FROM team_rank WHERE meet_year = 2026 AND meet_seq = 1
+      AND draws = (SELECT MAX(draws) FROM team_rank WHERE meet_year = 2026 AND meet_seq = 1)
+
+- id: q17
+  category: 선수
+  question: 2026시즌 수비수(DF) 중 득점 1위
+  order_matters: false
+  # 수정(2026-11-04): game_player_stat.position 은 그 경기 위치라 교체 출전이면 '대기' → 교체로 넣은 골이 빠졌음.
+  #   포지션은 등록 포지션(player.position) 기준으로 바꿈 (1위 선수가 달라짐)
+  sql: |
+    SELECT s.player_name, SUM(s.goals) FROM game_player_stat s JOIN player p ON p.player_id = s.player_id
+    WHERE s.meet_year = 2026 AND s.meet_seq = 1 AND p.position = 'DF'
+    GROUP BY s.player_id, s.player_name HAVING SUM(s.goals) = (SELECT MAX(t) FROM (SELECT SUM(s2.goals) AS t
+      FROM game_player_stat s2 JOIN player p2 ON p2.player_id = s2.player_id
+      WHERE s2.meet_year = 2026 AND s2.meet_seq = 1 AND p2.position = 'DF' GROUP BY s2.player_id) x)
+
+- id: q18
+  category: 복합
+  question: 2026시즌 비 오는 날 경기의 평균 득점(양 팀 합)
+  order_matters: false
+  # 수정(2026-11-04): meet_seq = 1 누락 + 실제 날씨 값에 '흐리고 비'도 있어 weather = '비' 로는 일부 누락
+  #   → LIKE '%비%'
+  sql: |
+    SELECT ROUND(AVG(home_goal + away_goal), 2) FROM game
+    WHERE meet_year = 2026 AND meet_seq = 1 AND weather LIKE '%비%' AND is_finished = 1
+
+- id: q19
+  category: 팀
+  question: 2026시즌 홈 승률이 가장 높은 팀
+  order_matters: false
+  sql: |
+    SELECT team_id, ROUND(1.0 * SUM(CASE WHEN result='W' THEN 1 ELSE 0 END) / COUNT(*), 3) AS r
+    FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1 AND is_home = 1 GROUP BY team_id
+    HAVING ROUND(1.0 * SUM(CASE WHEN result='W' THEN 1 ELSE 0 END) / COUNT(*), 3) = (
+      SELECT MAX(r2) FROM (SELECT ROUND(1.0 * SUM(CASE WHEN result='W' THEN 1 ELSE 0 END) / COUNT(*), 3) AS r2
+      FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1 AND is_home = 1 GROUP BY team_id) x)
+
+- id: q20
+  category: 이벤트
+  question: 2026시즌 경고를 가장 많이 받은 선수
+  order_matters: false
+  sql: |
+    SELECT player_name, SUM(yellow_cards) FROM game_player_stat WHERE meet_year = 2026 AND meet_seq = 1
+    GROUP BY player_id, player_name HAVING SUM(yellow_cards) = (SELECT MAX(s) FROM (SELECT SUM(yellow_cards) AS s
+      FROM game_player_stat WHERE meet_year = 2026 AND meet_seq = 1 GROUP BY player_id) x)
+
+- id: q21
+  category: 경기
+  question: 2026시즌 0-0 무승부 경기 수
+  order_matters: false
+  # 수정(2026-11-04): meet_seq = 1 누락 → K리그2 경기까지 세었음
+  sql: |
+    SELECT COUNT(*) FROM game WHERE meet_year = 2026 AND meet_seq = 1 AND is_finished = 1
+      AND home_goal = 0 AND away_goal = 0
+
+- id: q22
+  category: 복합
+  question: 2026시즌 포항 선수들 중 득점한 선수와 골 수
+  order_matters: false
+  sql: |
+    SELECT player_name, SUM(goals) FROM game_player_stat WHERE meet_year = 2026 AND meet_seq = 1 AND team_id = 'K03'
+    GROUP BY player_id, player_name HAVING SUM(goals) > 0
+
+- id: q23
+  category: 관중
+  question: 평균 관중 1만 5천명 넘는 구단 (2026 홈 기준)
+  order_matters: false
+  sql: |
+    SELECT home_team_id, ROUND(AVG(audience)) FROM game WHERE meet_year = 2026 AND meet_seq = 1 AND is_finished = 1
+    GROUP BY home_team_id HAVING AVG(audience) > 15000
+
+- id: q24
+  category: 팀
+  question: 2026시즌 포메이션별 사용 횟수
+  order_matters: false
+  sql: |
+    SELECT formation, COUNT(*) FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1 GROUP BY formation
+
+- id: q25
+  category: 복합
+  question: 2026시즌 라운드별 총 골 수
+  order_matters: false
+  sql: |
+    SELECT round_id, SUM(home_goal + away_goal) FROM game WHERE meet_year = 2026 AND meet_seq = 1 AND is_finished = 1
+    GROUP BY round_id
+
+# ---- 2026-11-04 추가: 새 DB에서 확인한 규칙(자책골·경기 구분·선발·퇴장·종료 경기·K리그2·2025)을 묻는 문항
+- id: q26
+  category: 이벤트
+  question: 2026 K리그1에서 상대 자책골로 얻은 골이 가장 많은 팀은?
+  order_matters: false
+  sql: |
+    SELECT team_id, COUNT(*) FROM game_event
+    WHERE meet_year = 2026 AND meet_seq = 1 AND event_type = 'goal' AND is_own_goal = 1
+    GROUP BY team_id HAVING COUNT(*) = (SELECT MAX(n) FROM (SELECT COUNT(*) AS n FROM game_event
+      WHERE meet_year = 2026 AND meet_seq = 1 AND event_type = 'goal' AND is_own_goal = 1 GROUP BY team_id) x)
+
+- id: q27
+  category: 선수
+  question: 2026 K리그1에서 교체로 들어가 골을 가장 많이 넣은 선수
+  order_matters: false
+  sql: |
+    SELECT player_name, SUM(goals) FROM game_player_stat
+    WHERE meet_year = 2026 AND meet_seq = 1 AND is_starter = 0 AND played = 1
+    GROUP BY player_id, player_name HAVING SUM(goals) = (SELECT MAX(s) FROM (SELECT SUM(goals) AS s
+      FROM game_player_stat WHERE meet_year = 2026 AND meet_seq = 1 AND is_starter = 0 AND played = 1
+      GROUP BY player_id) x)
+
+- id: q28
+  category: 팀
+  question: 2025 K리그1 파이널B에서 가장 많이 이긴 팀
+  order_matters: false
+  sql: |
+    SELECT t.team_id, COUNT(*) FROM game_team_stat t
+    JOIN game g ON g.meet_year = t.meet_year AND g.meet_seq = t.meet_seq AND g.game_id = t.game_id
+    WHERE t.meet_year = 2025 AND t.meet_seq = 1 AND g.game_type_name = '파이널B' AND t.result = 'W'
+    GROUP BY t.team_id HAVING COUNT(*) = (SELECT MAX(n) FROM (SELECT COUNT(*) AS n FROM game_team_stat t2
+      JOIN game g2 ON g2.meet_year = t2.meet_year AND g2.meet_seq = t2.meet_seq AND g2.game_id = t2.game_id
+      WHERE t2.meet_year = 2025 AND t2.meet_seq = 1 AND g2.game_type_name = '파이널B' AND t2.result = 'W'
+      GROUP BY t2.team_id) x)
+
+- id: q29
+  category: 경기
+  question: 2026 K리그1 남은 경기는 몇 경기야?
+  order_matters: false
+  sql: |
+    SELECT COUNT(*) FROM game WHERE meet_year = 2026 AND meet_seq = 1 AND is_finished = 0
+
+- id: q30
+  category: 이벤트
+  question: 2026 K리그1에서 경고 2회로 퇴장당한 선수 목록
+  order_matters: false
+  # 수정(2026-11-04, 첫 평가 후): 질문이 묻지 않은 game_id 를 넣어, 선수 목록이 맞아도 game_id 없으면 오답 처리됐음
+  sql: |
+    SELECT player_name FROM game_event WHERE meet_year = 2026 AND meet_seq = 1 AND event_code = 'SY'
+
+- id: q31
+  category: 선수
+  question: 2026 K리그1에서 시즌 중 두 팀 이상에서 뛴 선수는 몇 명?
+  order_matters: false
+  sql: |
+    SELECT COUNT(*) FROM (SELECT player_id FROM game_player_stat
+      WHERE meet_year = 2026 AND meet_seq = 1 AND played = 1
+      GROUP BY player_id HAVING COUNT(DISTINCT team_id) > 1) x
+
+- id: q32
+  category: 경기
+  question: 2025 K리그2 플레이오프 경기 결과
+  order_matters: false
+  # 수정(2026-11-04, 첫 평가 후): 질문이 묻지 않은 game_id 를 넣어, 스코어가 맞아도 game_id 없으면 오답 처리됐음
+  sql: |
+    SELECT home_goal, away_goal FROM game
+    WHERE meet_year = 2025 AND meet_seq = 2 AND game_type_name = 'Play Off' AND is_finished = 1
+
+- id: q33
+  category: 팀
+  question: 2026 K리그2에서 골을 가장 많이 넣은 팀
+  order_matters: false
+  sql: |
+    SELECT team_id, SUM(goals_for) FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 2
+    GROUP BY team_id HAVING SUM(goals_for) = (SELECT MAX(s) FROM (SELECT SUM(goals_for) AS s
+      FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 2 GROUP BY team_id) x)
+
+- id: q34
+  category: 선수
+  question: 2025 K리그1 득점 1위 선수와 골 수
+  order_matters: false
+  sql: |
+    SELECT player_name, SUM(goals) FROM game_player_stat WHERE meet_year = 2025 AND meet_seq = 1
+    GROUP BY player_id, player_name HAVING SUM(goals) = (SELECT MAX(s) FROM (SELECT SUM(goals) AS s
+      FROM game_player_stat WHERE meet_year = 2025 AND meet_seq = 1 GROUP BY player_id) x)
+
+- id: q35
+  category: 관중
+  question: 2025 K리그2 홈 평균 관중 1위 구단
+  order_matters: false
+  sql: |
+    SELECT home_team_id, ROUND(AVG(audience)) FROM game WHERE meet_year = 2025 AND meet_seq = 2 AND is_finished = 1
+    GROUP BY home_team_id HAVING AVG(audience) = (SELECT MAX(a) FROM (SELECT AVG(audience) AS a FROM game
+      WHERE meet_year = 2025 AND meet_seq = 2 AND is_finished = 1 GROUP BY home_team_id) x)
+
+- id: q36
+  category: 이벤트
+  question: 2026 K리그1 PK 골을 가장 많이 넣은 선수
+  order_matters: false
+  sql: |
+    SELECT player_name, COUNT(*) FROM game_event
+    WHERE meet_year = 2026 AND meet_seq = 1 AND event_type = 'goal' AND is_penalty = 1
+    GROUP BY player_id, player_name HAVING COUNT(*) = (SELECT MAX(n) FROM (SELECT COUNT(*) AS n FROM game_event
+      WHERE meet_year = 2026 AND meet_seq = 1 AND event_type = 'goal' AND is_penalty = 1 GROUP BY player_id) x)
+
+- id: q37
+  category: 이벤트
+  question: 2026 K리그1 퇴장은 모두 몇 번 나왔어?
+  order_matters: false
+  # 수정(2026-11-04): 퇴장 규칙(직접 퇴장 + 경고2회 퇴장)을 새 컬럼으로 표현. 이벤트로 셀 때와 결과 같음
+  sql: |
+    SELECT SUM(red_cards) + SUM(second_yellow_cards) FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1
+
+- id: q38
+  category: 경기
+  question: 2026 K리그1 지금까지 나온 총 골 수
+  order_matters: false
+  sql: |
+    SELECT SUM(home_goal + away_goal) FROM game WHERE meet_year = 2026 AND meet_seq = 1 AND is_finished = 1
+
+# ---- 2026-11-04 추가 2: 퇴장 구분 규칙 / 퇴단 선수
+- id: q39
+  category: 이벤트
+  question: 2026 K리그1 다이렉트 퇴장(레드카드)은 몇 번이었어?
+  order_matters: false
+  sql: |
+    SELECT SUM(red_cards) FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1
+
+- id: q40
+  category: 선수
+  question: 2026 K리그1에서 뛰었는데 지금은 K리그를 떠난 선수는 몇 명?
+  order_matters: false
+  sql: |
+    SELECT COUNT(DISTINCT s.player_id) FROM game_player_stat s JOIN player p ON p.player_id = s.player_id
+    WHERE s.meet_year = 2026 AND s.meet_seq = 1 AND s.played = 1 AND p.is_active = 0

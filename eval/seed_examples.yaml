@@ -1,0 +1,149 @@
+# 검증된 정답 SQL 예시집 (Few-shot 용). 앱 시작 시 app_sql_example 에 approved=1 로 들어간다.
+# ⚠️ 평가셋(questions.yaml)과 질문이 겹치지 않게 관리 (겹치면 정답률이 부풀려짐).
+# 2026-11-04: 새 DB(2025~2026) 기준으로 다시 씀. 이적 선수는 player_id 로 묶고 구단은 합쳐 보여준다.
+- question: 2026 K리그1 득점 순위 상위 10명
+  sql: |
+    SELECT p.player_name AS 선수명, GROUP_CONCAT(DISTINCT c.team_s_name) AS 구단,
+           SUM(p.goals) AS 득점, SUM(p.played) AS 출장
+    FROM game_player_stat p JOIN club c ON c.team_id = p.team_id
+    WHERE p.meet_year = 2026 AND p.meet_seq = 1
+    GROUP BY p.player_id, p.player_name
+    ORDER BY 득점 DESC, 출장 ASC LIMIT 10
+
+- question: 2026 K리그1 현재 순위표 보여줘
+  sql: |
+    SELECT ranking AS 순위, team_name AS 구단, points AS 승점, played AS 경기, wins AS 승, draws AS 무,
+           losses AS 패, goals_for AS 득점, goals_against AS 실점, goal_diff AS 득실차
+    FROM team_rank WHERE meet_year = 2026 AND meet_seq = 1 ORDER BY ranking
+
+- question: 2026시즌 구단별 홈 경기 평균 관중
+  sql: |
+    SELECT c.team_s_name AS 구단, COUNT(*) AS 홈경기, ROUND(AVG(g.audience)) AS 평균관중
+    FROM game g JOIN club c ON c.team_id = g.home_team_id
+    WHERE g.meet_year = 2026 AND g.meet_seq = 1 AND g.is_finished = 1
+    GROUP BY c.team_s_name ORDER BY 평균관중 DESC
+
+- question: 서울의 2026시즌 홈/원정 성적 비교
+  sql: |
+    SELECT CASE WHEN is_home = 1 THEN '홈' ELSE '원정' END AS 구분, COUNT(*) AS 경기,
+           SUM(CASE WHEN result = 'W' THEN 1 ELSE 0 END) AS 승,
+           SUM(CASE WHEN result = 'D' THEN 1 ELSE 0 END) AS 무,
+           SUM(CASE WHEN result = 'L' THEN 1 ELSE 0 END) AS 패,
+           SUM(goals_for) AS 득점, SUM(goals_against) AS 실점
+    FROM game_team_stat WHERE meet_year = 2026 AND meet_seq = 1 AND team_id = 'K09'
+    GROUP BY is_home
+
+- question: 2026 K리그1 도움 많이 한 선수 5명
+  sql: |
+    SELECT p.player_name AS 선수명, GROUP_CONCAT(DISTINCT c.team_s_name) AS 구단, SUM(p.assists) AS 도움
+    FROM game_player_stat p JOIN club c ON c.team_id = p.team_id
+    WHERE p.meet_year = 2026 AND p.meet_seq = 1
+    GROUP BY p.player_id, p.player_name ORDER BY 도움 DESC LIMIT 5
+
+- question: 울산과 전북 상대 전적 2026
+  sql: |
+    SELECT g.game_date AS 경기일, h.team_s_name AS 홈, g.home_goal AS 홈득점, g.away_goal AS 원정득점, a.team_s_name AS 원정
+    FROM game g JOIN club h ON h.team_id = g.home_team_id JOIN club a ON a.team_id = g.away_team_id
+    WHERE g.meet_year = 2026 AND g.meet_seq = 1 AND g.is_finished = 1
+      AND ((g.home_team_id = 'K01' AND g.away_team_id = 'K05') OR (g.home_team_id = 'K05' AND g.away_team_id = 'K01'))
+    ORDER BY g.game_date
+
+- question: 2026시즌 경고를 가장 많이 받은 구단
+  sql: |
+    SELECT c.team_s_name AS 구단, SUM(t.yellow_cards) AS 경고, SUM(t.red_cards) AS 직접퇴장
+    FROM game_team_stat t JOIN club c ON c.team_id = t.team_id
+    WHERE t.meet_year = 2026 AND t.meet_seq = 1
+    GROUP BY c.team_s_name ORDER BY 경고 DESC
+
+- question: 2026 결승골을 가장 많이 넣은 선수
+  sql: |
+    SELECT e.player_name AS 선수명, COUNT(*) AS 결승골
+    FROM game_event e
+    WHERE e.meet_year = 2026 AND e.meet_seq = 1 AND e.event_type = 'goal' AND e.is_winning_goal = 1
+      AND e.is_own_goal = 0
+    GROUP BY e.player_id, e.player_name ORDER BY 결승골 DESC LIMIT 10
+
+# ---- 2026-11-04 추가: 자책골·선발·경기 구분·퇴장·예정 경기·K리그2 규칙 예시
+- question: 2025 K리그1 자책골 기록 보여줘
+  sql: |
+    SELECT g.game_date AS 경기일, e.player_name AS 자책선수, c.team_s_name AS 득점인정팀, e.remark AS 문자중계
+    FROM game_event e
+    JOIN game g ON g.meet_year = e.meet_year AND g.meet_seq = e.meet_seq AND g.game_id = e.game_id
+    JOIN club c ON c.team_id = e.team_id
+    WHERE e.meet_year = 2025 AND e.meet_seq = 1 AND e.event_type = 'goal' AND e.is_own_goal = 1
+    ORDER BY g.game_date
+
+- question: 2025 K리그1 선발 출전이 가장 많은 선수 10명
+  sql: |
+    SELECT p.player_name AS 선수명, GROUP_CONCAT(DISTINCT c.team_s_name) AS 구단,
+           SUM(p.is_starter) AS 선발, SUM(p.played) AS 출장
+    FROM game_player_stat p JOIN club c ON c.team_id = p.team_id
+    WHERE p.meet_year = 2025 AND p.meet_seq = 1
+    GROUP BY p.player_id, p.player_name ORDER BY 선발 DESC LIMIT 10
+
+- question: 2026 K리그1 스플릿 전(정규 33라운드) 구단별 승점
+  sql: |
+    SELECT c.team_s_name AS 구단, COUNT(*) AS 경기, SUM(t.points) AS 승점,
+           SUM(t.goals_for) - SUM(t.goals_against) AS 득실차
+    FROM game_team_stat t
+    JOIN game g ON g.meet_year = t.meet_year AND g.meet_seq = t.meet_seq AND g.game_id = t.game_id
+    JOIN club c ON c.team_id = t.team_id
+    WHERE t.meet_year = 2026 AND t.meet_seq = 1 AND g.game_type_name = '스플릿일반'
+    GROUP BY c.team_s_name ORDER BY 승점 DESC, 득실차 DESC
+
+- question: 2025 K리그1 구단별 퇴장 횟수
+  sql: |
+    SELECT c.team_s_name AS 구단, SUM(t.red_cards) + SUM(t.second_yellow_cards) AS 퇴장,
+           SUM(t.red_cards) AS 직접퇴장, SUM(t.second_yellow_cards) AS 경고2회퇴장
+    FROM game_team_stat t JOIN club c ON c.team_id = t.team_id
+    WHERE t.meet_year = 2025 AND t.meet_seq = 1
+    GROUP BY c.team_s_name
+    HAVING SUM(t.red_cards) + SUM(t.second_yellow_cards) > 0
+    ORDER BY 퇴장 DESC
+
+- question: 서울 다음 경기 일정
+  sql: |
+    SELECT g.game_date AS 경기일, g.weekday AS 요일, g.game_time AS 시간,
+           h.team_s_name AS 홈, a.team_s_name AS 원정, g.game_type_name AS 구분
+    FROM game g JOIN club h ON h.team_id = g.home_team_id JOIN club a ON a.team_id = g.away_team_id
+    WHERE g.is_finished = 0 AND (g.home_team_id = 'K09' OR g.away_team_id = 'K09')
+    ORDER BY g.game_date, g.game_time LIMIT 3
+
+- question: 2025 K리그2 정규 리그 구단별 승점과 득실차
+  sql: |
+    SELECT c.team_s_name AS 구단, COUNT(*) AS 경기,
+           SUM(CASE WHEN t.result = 'W' THEN 1 ELSE 0 END) AS 승,
+           SUM(CASE WHEN t.result = 'D' THEN 1 ELSE 0 END) AS 무,
+           SUM(CASE WHEN t.result = 'L' THEN 1 ELSE 0 END) AS 패,
+           SUM(t.points) AS 승점, SUM(t.goals_for) - SUM(t.goals_against) AS 득실차
+    FROM game_team_stat t
+    JOIN game g ON g.meet_year = t.meet_year AND g.meet_seq = t.meet_seq AND g.game_id = t.game_id
+    JOIN club c ON c.team_id = t.team_id
+    WHERE t.meet_year = 2025 AND t.meet_seq = 2 AND g.game_type_name = '일반'
+    GROUP BY c.team_s_name ORDER BY 승점 DESC, 득실차 DESC
+
+- question: 2025 K리그1 퇴장을 가장 많이 당한 선수
+  sql: |
+    SELECT p.player_name AS 선수명, GROUP_CONCAT(DISTINCT c.team_s_name) AS 구단,
+           SUM(p.red_cards) + SUM(p.second_yellow_cards) AS 퇴장,
+           SUM(p.red_cards) AS 직접퇴장, SUM(p.second_yellow_cards) AS 경고2회퇴장
+    FROM game_player_stat p JOIN club c ON c.team_id = p.team_id
+    WHERE p.meet_year = 2025 AND p.meet_seq = 1
+    GROUP BY p.player_id, p.player_name
+    HAVING SUM(p.red_cards) + SUM(p.second_yellow_cards) > 0
+    ORDER BY 퇴장 DESC LIMIT 10
+
+# ---- 2026-11-04 추가 2: 퇴단 선수 (player.is_active = 0)
+- question: 2025 K리그1에서 뛰고 지금은 K리그를 떠난 선수들의 국적별 득점
+  sql: |
+    SELECT p.nationality AS 국적, COUNT(DISTINCT s.player_id) AS 선수수, SUM(s.goals) AS 득점
+    FROM game_player_stat s JOIN player p ON p.player_id = s.player_id
+    WHERE s.meet_year = 2025 AND s.meet_seq = 1 AND p.is_active = 0
+    GROUP BY p.nationality ORDER BY 득점 DESC
+
+- question: 2026 K리그1 현역 선수만 보는 도움 순위 상위 5명
+  sql: |
+    SELECT s.player_name AS 선수명, GROUP_CONCAT(DISTINCT c.team_s_name) AS 구단, SUM(s.assists) AS 도움
+    FROM game_player_stat s JOIN player p ON p.player_id = s.player_id JOIN club c ON c.team_id = s.team_id
+    WHERE s.meet_year = 2026 AND s.meet_seq = 1 AND p.is_active = 1
+    GROUP BY s.player_id, s.player_name ORDER BY 도움 DESC LIMIT 5

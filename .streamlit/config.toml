@@ -1,0 +1,10 @@
+# 배포용 Streamlit 설정 (비밀값 없음 → 저장소에 올려도 됨)
+[client]
+# 화면에 오류 원문·스택트레이스를 보여주지 않는다 (접속 주소·계정이 섞일 수 있음).
+# 자세한 오류는 Streamlit Community Cloud 의 Manage app → 로그에서만 본다.
+showErrorDetails = "none"
+toolbarMode = "viewer"
+
+[server]
+# 앱은 파일 업로드 기능이 없다
+maxUploadSize = 1
